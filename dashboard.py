@@ -1,97 +1,80 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import matplotlib.pyplot as plt
 
-st.set_page_config(layout="wide", page_title="AR Dashboard")
-st.title("📊 Accounts Receivable Dashboard")
+st.set_page_config(page_title="AR Dashboard", layout="wide")
+st.title("📊 AR Aging Dashboard – In Scope & Out of Scope Analysis")
 
-# File upload for both Excel files
-uploaded_file_master = st.file_uploader("📂 Upload Master Dashboard Excel file", type=["xlsx", "xls"], key="master")
-uploaded_file_final = st.file_uploader("📂 Upload Final Dashboard Excel file", type=["xlsx", "xls"], key="final")
+# Upload Excel file
+uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 
-if uploaded_file_master and uploaded_file_final:
-    try:
-        # Load and clean column names for both files
-        df_master = pd.read_excel(uploaded_file_master)
-        df_final = pd.read_excel(uploaded_file_final)
+if uploaded_file:
+    # Read available sheet names
+    xls = pd.ExcelFile(uploaded_file)
+    sheet = st.selectbox("Select sheet to analyze", xls.sheet_names)
+    df = pd.read_excel(xls, sheet_name=sheet)
 
-        # Clean column names
-        df_master.columns = df_master.columns.str.strip()
-        df_final.columns = df_final.columns.str.strip()
+    # Clean column names
+    df.columns = df.columns.str.strip()
 
-        st.success("✅ Files loaded successfully!")
+    # Check required columns
+    required_cols = [
+        'Scope Status', 'Outstanding USD (AR system)', 'Collector Name', 'Region',
+        '31-60 day', '61-90 day', '91-180 day', '181-360 day', '360+ day',
+        'Overdue > 90 day', 'For Reporting'
+    ]
+    missing = [col for col in required_cols if col not in df.columns]
 
-        # --------------------------------------
-        # Visualization 1: Scope Status Summary
-        # --------------------------------------
-        st.subheader("🔍 In Scope vs Out of Scope Summary")
+    if missing:
+        st.error(f"❌ Missing columns in uploaded file: {', '.join(missing)}")
+    else:
+        # Convert numeric columns
+        numeric_cols = required_cols[1:]
+        df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce').fillna(0)
 
-        # Combine data from both DataFrames if needed
-        df_combined = pd.concat([df_master, df_final], ignore_index=True)
+        # 1. Scope Summary
+        scope_summary = df.groupby('Scope Status').agg({
+            'Outstanding USD (AR system)': 'sum',
+            'Scope Status': 'count'
+        }).rename(columns={'Outstanding USD (AR system)': 'Total Outstanding', 'Scope Status': 'Count'})
 
-        # Ensure the Outstanding column is numeric
-        df_combined['Outstanding USD (AR system)'] = pd.to_numeric(df_combined['Outstanding USD (AR system)'], errors='coerce')
+        st.subheader("1️⃣ In Scope vs Out of Scope Summary")
+        st.dataframe(scope_summary)
 
-        # Group by Scope Status
-        scope_summary = df_combined.groupby('Scope Status').agg(
-            Count=('Outstanding USD (AR system)', 'count'),
-            Total_Outstanding=('Outstanding USD (AR system)', 'sum')
-        ).reset_index()
+        # 2. Collector Aging (In Scope)
+        in_scope = df[df['Scope Status'].str.strip().str.lower() == 'in scope']
+        collector_aging = in_scope.groupby('Collector Name')[
+            ['31-60 day', '61-90 day', '91-180 day', '181-360 day', '360+ day', 'Overdue > 90 day']
+        ].sum()
 
-        st.dataframe(scope_summary.style.format({'Total_Outstanding': '${:,.2f}'}))
+        st.subheader("2️⃣ Collector-wise Aging (In Scope Only)")
+        st.dataframe(collector_aging)
 
-        # Plotting the Scope Status Summary
-        fig_scope = px.bar(
-            scope_summary,
-            x='Scope Status',
-            y='Total_Outstanding',
-            color='Scope Status',
-            text='Count',
-            title='Total Outstanding by Scope Status',
-            labels={'Total_Outstanding': 'Outstanding USD'}
-        )
-        st.plotly_chart(fig_scope, use_container_width=True)
+        # 3. Region-wise Outstanding (In Scope)
+        region_outstanding = in_scope.groupby('Region')['Outstanding USD (AR system)'].sum()
+        st.subheader("3️⃣ Region-wise Outstanding (In Scope Only)")
+        st.dataframe(region_outstanding)
 
-        # --------------------------------------
-        # Visualization 2: Collector-wise Aging (In Scope only)
-        # --------------------------------------
-        st.markdown("---")
-        st.header("📌 In-Scope Collector Aging")
+        # 4. Credit vs Debit (Overdue > 90 day)
+        credit_debit = in_scope.copy()
+        credit_debit['Type'] = credit_debit['Overdue > 90 day'].apply(lambda x: 'Debit' if x > 0 else 'Credit')
+        cd_summary = credit_debit.groupby('Type')['Overdue > 90 day'].sum()
 
-        # Filter for In Scope
-        in_scope_df = df_combined[df_combined['Scope Status'].str.strip().str.lower() == "in scope"]
+        st.subheader("4️⃣ Overdue > 90 Days (Credit vs Debit)")
+        st.dataframe(cd_summary)
 
-        if in_scope_df.empty:
-            st.warning("⚠️ No data available for 'In Scope'.")
-        else:
-            # Group by Collector and sum aging columns
-            aging_cols = ['31-60', '61-90', 'F_91-180 days', 'G_181-360 days', 'H_360+ days', 'Overdue > 90 days']
-            collector_aging_summary = in_scope_df.groupby('Collector (AR system)')[aging_cols].sum().reset_index()
+        # 5. For Reporting Summary (In Scope)
+        reporting_summary = in_scope.groupby('For Reporting')['Outstanding USD (AR system)'].sum()
+        st.subheader("5️⃣ For Reporting Summary (In Scope Only)")
+        st.dataframe(reporting_summary)
 
-            # Calculate total outstanding for collectors
-            collector_aging_summary['Total_Outstanding'] = in_scope_df.groupby('Collector (AR system)')['Outstanding USD (AR system)'].sum().values
+        # Optional chart: Collector Aging Stacked Bar
+        st.subheader("📊 Collector Aging Chart (Stacked Bar)")
+        fig, ax = plt.subplots(figsize=(10, 5))
+        collector_aging.plot(kind='bar', stacked=True, ax=ax)
+        ax.set_ylabel("Amount")
+        ax.set_title("Collector-wise Aging")
+        st.pyplot(fig)
 
-            st.dataframe(collector_aging_summary.style.format('${:,.2f}'))
-
-            # Melt the DataFrame for Plotly
-            melted = collector_aging_summary.melt(
-                id_vars='Collector (AR system)',
-                value_vars=aging_cols,
-                var_name="Aging Bucket",
-                value_name="Amount"
-            )
-
-            # Plotting the Collector-wise Aging
-            fig_aging = px.bar(
-                melted,
-                x="Amount",
-                y='Collector (AR system)',
-                color="Aging Bucket",
-                orientation='h',
-                title="Aging by Collector (In Scope Only)",
-                height=600
-            )
-            st.plotly_chart(fig_aging, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"❌ Error while processing: {str(e)}")
+else:
+    st.info("📎 Please upload an Excel file to get started.")
