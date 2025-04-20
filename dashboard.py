@@ -57,3 +57,19 @@ if uploaded_file:
 
 else:
     st.info("👈 Upload an Excel file to begin.")
+    # ---------------------
+# Scope Status Summary
+# ---------------------
+if scope_col in df.columns and outstanding_col in df.columns:
+    st.success("✅ Columns found! Analyzing...")
+
+    # ... (Original Scope Status Summary block here)
+
+    # --------------------------
+    # Collector-wise Aging Logic
+    # --------------------------
+    st.markdown("---")
+    st.header("📌 In-Scope Collector Aging Breakdown")
+
+    # (Paste new code block here)
+
