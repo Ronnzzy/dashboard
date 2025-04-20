@@ -2,92 +2,77 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Function to load the pivot table data (uploaded by the user)
-def load_data(uploaded_file):
-    try:
-        # Load the Excel file into a DataFrame
-        return pd.read_excel(uploaded_file, sheet_name="Pivot", skiprows=0)  # Adjust skiprows if necessary
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        return None
+st.set_page_config(page_title="Accounts Receivable Dashboard", layout="wide")
+st.title("📊 Accounts Receivable Dashboard")
 
-# Streamlit App
-st.title("AR Collection Dashboard")
-
-# File uploader for the pivot table
-uploaded_file = st.file_uploader("Upload your Excel file (pivot table data)", type=["xlsx"])
+uploaded_file = st.file_uploader("📁 Upload Master Dashboard Excel File", type=["xlsx", "xls"])
 
 if uploaded_file:
-    # Load the data
-    data = load_data(uploaded_file)
+    try:
+        # Read relevant sheets
+        df_pivot = pd.read_excel(uploaded_file, sheet_name="Pivot")
+        df_data = pd.read_excel(uploaded_file, sheet_name="Dashboard 21 April")
 
-    if data is not None:
-        # Display raw data for reference
-        st.header("Raw Data (Pivot Table)")
-        st.write(data)
+        st.success("✅ File Uploaded Successfully!")
 
-        # Overview Section
-        st.header("Key Metrics")
-        try:
-            total_count = data['Total Count'].sum()
-            total_outstanding = data['Total Outstanding'].sum()
-            overdue_90 = data['Overdue > 90 days'].sum()
+        # Clean & preprocess
+        df_data.columns = df_data.columns.str.strip()
+        df_data = df_data[df_data["Scope Status"].notna()]  # Remove blank scope
+        df_data["Scope Status"] = df_data["Scope Status"].str.strip()
 
-            st.metric("Total Count (In Scope)", total_count)
-            st.metric("Total Outstanding (In Scope)", f"${total_outstanding:,.2f}")
-            st.metric("Total Overdue > 90 Days", f"${overdue_90:,.2f}")
-        except KeyError:
-            st.error("Columns 'Total Count', 'Total Outstanding', or 'Overdue > 90 days' are missing from the data.")
+        # Convert aging columns to numeric (handle blanks)
+        aging_cols = ["M. 1-30 day", "N. 31-60 day", "O. 61-90 day", "P. 91-180 day", "Q. 181-360 day", "R. 360+ day"]
+        for col in aging_cols:
+            df_data[col] = pd.to_numeric(df_data[col], errors='coerce').fillna(0)
 
-        # Region-Wise Analysis
-        st.header("Outstanding Amount by Region")
-        try:
-            region_data = data.groupby('Region')['Outstanding USD (AR system)'].sum().reset_index()
-            region_fig = px.pie(region_data, names='Region', values='Outstanding USD (AR system)', title='Outstanding by Region')
-            st.plotly_chart(region_fig)
-        except KeyError:
-            st.error("Column 'Region' or 'Outstanding USD (AR system)' is missing from the data.")
+        df_data["Outstanding"] = df_data[aging_cols].sum(axis=1)
 
-        # Aging Buckets Breakdown
-        st.header("Aging Buckets Breakdown")
-        try:
-            aging_buckets = data[['31-60', '61-90', 'F_91-180 days', 'G_181-360 days', 'H_360+ days']].sum()
-            aging_df = pd.DataFrame({'Bucket': aging_buckets.index, 'Amount': aging_buckets.values})
-            aging_fig = px.bar(aging_df, x='Bucket', y='Amount', color='Bucket', title='Aging Buckets Breakdown')
-            st.plotly_chart(aging_fig)
-        except KeyError:
-            st.error("Aging bucket columns (e.g., '31-60', '61-90') are missing from the data.")
+        # Filter In Scope
+        in_scope = df_data[df_data["Scope Status"] == "In Scope"]
 
-        # Collector Analysis
-        st.header("Outstanding Amount by Collector")
-        try:
-            collector_data = data.groupby('Collector (AR system)')['Outstanding USD (AR system)'].sum().reset_index()
-            collector_fig = px.bar(collector_data, x='Collector (AR system)', y='Outstanding USD (AR system)', title='Outstanding by Collector')
-            st.plotly_chart(collector_fig)
-        except KeyError:
-            st.error("Column 'Collector (AR system)' or 'Outstanding USD (AR system)' is missing from the data.")
+        st.header("📌 In Scope vs Out of Scope Summary")
+        scope_summary = df_data.groupby("Scope Status").agg(
+            Count=("ACCOUNT NO", "nunique"),
+            Total_Outstanding=("Outstanding", "sum")
+        ).reset_index()
+        st.dataframe(scope_summary)
 
-        # Outstanding Reporting by Category
-        st.header("Outstanding Reporting by Category")
-        try:
-            category_data = data.groupby('Customer Category Grouping')['Outstanding USD (AR system)'].sum().reset_index()
-            category_fig = px.bar(category_data, x='Customer Category Grouping', y='Outstanding USD (AR system)', title='Outstanding by Category')
-            st.plotly_chart(category_fig)
-        except KeyError:
-            st.error("Column 'Customer Category Grouping' or 'Outstanding USD (AR system)' is missing from the data.")
+        fig_scope = px.pie(scope_summary, names="Scope Status", values="Total_Outstanding", title="Scope-wise Outstanding")
+        st.plotly_chart(fig_scope, use_container_width=True)
 
-        # Comparative Analysis
-        st.header("Custom Comparisons")
-        filter_options = st.multiselect("Filter by Region or Category",
-                                        options=data['Region'].unique() if 'Region' in data.columns else [],
-                                        default=None)
-        if filter_options:
-            comparison_data = data[data['Region'].isin(filter_options)]
-            st.write("Filtered Data", comparison_data)
-            try:
-                comparison_fig = px.bar(comparison_data, x='Region', y='Outstanding USD (AR system)', color='Region', title='Comparison of Selected Regions')
-                st.plotly_chart(comparison_fig)
-            except KeyError:
-                st.error("Column 'Region' or 'Outstanding USD (AR system)' is missing from the filtered data.")
+        st.header("📌 Collector-wise Aging (Only In Scope)")
+        aging_by_collector = in_scope.groupby("COLLECTOR")[aging_cols].sum().reset_index()
+        st.dataframe(aging_by_collector)
+
+        fig_collector = px.bar(
+            aging_by_collector, x="COLLECTOR", y=aging_cols,
+            title="Collector-wise Aging (In Scope Only)",
+            barmode="stack"
+        )
+        st.plotly_chart(fig_collector, use_container_width=True)
+
+        st.header("📌 Region-wise Outstanding (In Scope Only)")
+        if "REGION" in in_scope.columns:
+            region_summary = in_scope.groupby("REGION")["Outstanding"].sum().reset_index()
+            st.dataframe(region_summary)
+            fig_region = px.pie(region_summary, names="REGION", values="Outstanding", title="Region-wise Outstanding")
+            st.plotly_chart(fig_region, use_container_width=True)
+
+        st.header("📌 90+ Day Credit vs Debit (In Scope Only)")
+        in_scope["Overdue_90+"] = in_scope["Q. 181-360 day"] + in_scope["R. 360+ day"]
+        credit_debit = in_scope.groupby("CR/DB")["Overdue_90+"].sum().reset_index()
+        st.dataframe(credit_debit)
+        fig_cd = px.bar(credit_debit, x="CR/DB", y="Overdue_90+", title="Credit/Debit Overdue >90 Days")
+        st.plotly_chart(fig_cd, use_container_width=True)
+
+        st.header("📌 For Reporting View (In Scope Only)")
+        if "For Reporting" in in_scope.columns:
+            reporting_summary = in_scope.groupby("For Reporting")["Outstanding"].sum().reset_index()
+            st.dataframe(reporting_summary)
+            fig_reporting = px.pie(reporting_summary, names="For Reporting", values="Outstanding", title="For Reporting Distribution")
+            st.plotly_chart(fig_reporting, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"❌ Error processing file: {e}")
 else:
-    st.info("Please upload the pivot table file to generate the dashboard.")
+    st.info("⬆ Please upload the Master Dashboard Excel file to begin.")
