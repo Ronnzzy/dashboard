@@ -9,48 +9,56 @@ uploaded_file = st.file_uploader("📂 Upload your Excel file", type=["xlsx", "x
 
 if uploaded_file:
     try:
-        # Load and clean column names
         df = pd.read_excel(uploaded_file)
         df.columns = df.columns.str.strip()
 
         st.success("✅ File loaded successfully!")
-        st.write("### Sample Data")
+        st.write("### Preview of Uploaded Data")
         st.dataframe(df.head())
 
-        # Define columns
-        scope_col = 'Scope Status'  # H
-        outstanding_col = 'Outstanding USD (AR system)'  # K
-        collector_col = 'Collector (AR system)'  # G
-        aging_cols = [  # M to R
-            '31-60',
-            '61-90',
-            'F. 91-180 day',
-            'G. 181-360 day',
-            'H. 360+ day',
-            'Overdue > 90 day'
-        ]
-        required_cols = [scope_col, outstanding_col, collector_col] + aging_cols
-        missing_cols = [col for col in required_cols if col not in df.columns]
+        # Show all column names
+        st.write("### ✅ Detected Column Names:")
+        st.write(df.columns.tolist())
 
-        if missing_cols:
-            st.error(f"❌ Missing columns in uploaded file: {', '.join(missing_cols)}")
+        # Define expected column keys (we’ll match them smartly)
+        expected_cols = {
+            'Scope Status': 'scope_col',
+            'Outstanding USD (AR system)': 'outstanding_col',
+            'Collector (AR system)': 'collector_col',
+        }
+
+        aging_keywords = ['31-60', '61-90', '91-180', '181-360', '360+', 'Overdue']
+
+        # Match columns smartly
+        col_map = {}
+        for col in df.columns:
+            for expected, key in expected_cols.items():
+                if expected.lower() in col.lower():
+                    col_map[key] = col
+            for aging in aging_keywords:
+                if aging.lower() in col.lower():
+                    col_map.setdefault('aging', []).append(col)
+
+        missing_keys = [key for key in expected_cols.values() if key not in col_map]
+        if missing_keys:
+            st.error(f"❌ Missing required columns: {missing_keys}")
+        elif 'aging' not in col_map or len(col_map['aging']) < 3:
+            st.error(f"❌ Could not detect enough aging columns. Found: {col_map.get('aging', [])}")
         else:
-            # --------------------------------------
-            # ✅ 1. Scope Status Summary
-            # --------------------------------------
-            st.subheader("🔍 In Scope vs Out of Scope Summary")
+            scope_col = col_map['scope_col']
+            outstanding_col = col_map['outstanding_col']
+            collector_col = col_map['collector_col']
+            aging_cols = col_map['aging']
 
-            # Ensure the outstanding column is numeric
-            df[outstanding_col] = pd.to_numeric(df[outstanding_col], errors='coerce')
-
+            # ----------------- SCOPE SUMMARY ----------------
+            st.subheader("🔍 In Scope vs Out of Scope")
             scope_summary = df.groupby(scope_col).agg(
                 Count=(outstanding_col, 'count'),
                 Total_Outstanding=(outstanding_col, 'sum')
             ).reset_index()
-
             st.dataframe(scope_summary.style.format({'Total_Outstanding': '${:,.2f}'}))
 
-            fig_scope = px.bar(
+            fig1 = px.bar(
                 scope_summary,
                 x=scope_col,
                 y='Total_Outstanding',
@@ -59,19 +67,30 @@ if uploaded_file:
                 title='Total Outstanding by Scope Status',
                 labels={'Total_Outstanding': 'Outstanding USD'}
             )
-            st.plotly_chart(fig_scope, use_container_width=True)
+            st.plotly_chart(fig1, use_container_width=True)
 
-            # --------------------------------------
-            # ✅ 2. Collector-wise Aging (In Scope only)
-            # --------------------------------------
-            st.markdown("---")
-            st.header("📌 In-Scope Collector Aging (Based on Columns M–R)")
-
+            # ----------------- COLLECTOR AGING (IN SCOPE) ----------------
+            st.subheader("📌 Collector-wise Aging (Only In Scope)")
             in_scope_df = df[df[scope_col].str.strip().str.lower() == "in scope"]
 
-            if in_scope_df.empty:
-                st.warning("⚠️ No data available for 'In Scope'.")
-            else:
-                collector_aging_summary = in_scope_df.groupby(collector_col)[aging_cols].sum().reset_index()
+            collector_aging = in_scope_df.groupby(collector_col)[aging_cols].sum().reset_index()
+            st.dataframe(collector_aging.style.format('${:,.2f}'))
 
-                st.dataframe(collector_aging_summary.style
+            melted = collector_aging.melt(
+                id_vars=collector_col,
+                var_name="Aging Bucket",
+                value_name="Amount"
+            )
+            fig2 = px.bar(
+                melted,
+                x="Amount",
+                y=collector_col,
+                color="Aging Bucket",
+                orientation='h',
+                title="Aging Breakdown by Collector (In Scope Only)",
+                height=600
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
