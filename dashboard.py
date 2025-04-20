@@ -40,6 +40,9 @@ if uploaded_file:
             # --------------------------------------
             st.subheader("🔍 In Scope vs Out of Scope Summary")
 
+            # Ensure the outstanding column is numeric
+            df[outstanding_col] = pd.to_numeric(df[outstanding_col], errors='coerce')
+
             scope_summary = df.groupby(scope_col).agg(
                 Count=(outstanding_col, 'count'),
                 Total_Outstanding=(outstanding_col, 'sum')
@@ -66,26 +69,9 @@ if uploaded_file:
 
             in_scope_df = df[df[scope_col].str.strip().str.lower() == "in scope"]
 
-            collector_aging_summary = in_scope_df.groupby(collector_col)[aging_cols].sum().reset_index()
+            if in_scope_df.empty:
+                st.warning("⚠️ No data available for 'In Scope'.")
+            else:
+                collector_aging_summary = in_scope_df.groupby(collector_col)[aging_cols].sum().reset_index()
 
-            st.dataframe(collector_aging_summary.style.format('${:,.2f}'))
-
-            melted = collector_aging_summary.melt(
-                id_vars=collector_col,
-                var_name="Aging Bucket",
-                value_name="Amount"
-            )
-
-            fig_aging = px.bar(
-                melted,
-                x="Amount",
-                y=collector_col,
-                color="Aging Bucket",
-                orientation='h',
-                title="Aging by Collector (In Scope Only)",
-                height=600
-            )
-            st.plotly_chart(fig_aging, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"❌ Error while processing: {e}")
+                st.dataframe(collector_aging_summary.style
