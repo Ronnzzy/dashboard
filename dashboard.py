@@ -2,77 +2,53 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Accounts Receivable Dashboard", layout="wide")
-st.title("📊 Accounts Receivable Dashboard")
-
-uploaded_file = st.file_uploader("📁 Upload Master Dashboard Excel File", type=["xlsx", "xls"])
-
-if uploaded_file:
+# Function to load data from uploaded file
+def load_data(uploaded_file):
     try:
-        # Read relevant sheets
-        df_pivot = pd.read_excel(uploaded_file, sheet_name="Pivot")
-        df_data = pd.read_excel(uploaded_file, sheet_name="Dashboard 21 April")
-
-        st.success("✅ File Uploaded Successfully!")
-
-        # Clean & preprocess
-        df_data.columns = df_data.columns.str.strip()
-        df_data = df_data[df_data["Scope Status"].notna()]  # Remove blank scope
-        df_data["Scope Status"] = df_data["Scope Status"].str.strip()
-
-        # Convert aging columns to numeric (handle blanks)
-        aging_cols = ["M. 1-30 day", "N. 31-60 day", "O. 61-90 day", "P. 91-180 day", "Q. 181-360 day", "R. 360+ day"]
-        for col in aging_cols:
-            df_data[col] = pd.to_numeric(df_data[col], errors='coerce').fillna(0)
-
-        df_data["Outstanding"] = df_data[aging_cols].sum(axis=1)
-
-        # Filter In Scope
-        in_scope = df_data[df_data["Scope Status"] == "In Scope"]
-
-        st.header("📌 In Scope vs Out of Scope Summary")
-        scope_summary = df_data.groupby("Scope Status").agg(
-            Count=("ACCOUNT NO", "nunique"),
-            Total_Outstanding=("Outstanding", "sum")
-        ).reset_index()
-        st.dataframe(scope_summary)
-
-        fig_scope = px.pie(scope_summary, names="Scope Status", values="Total_Outstanding", title="Scope-wise Outstanding")
-        st.plotly_chart(fig_scope, use_container_width=True)
-
-        st.header("📌 Collector-wise Aging (Only In Scope)")
-        aging_by_collector = in_scope.groupby("COLLECTOR")[aging_cols].sum().reset_index()
-        st.dataframe(aging_by_collector)
-
-        fig_collector = px.bar(
-            aging_by_collector, x="COLLECTOR", y=aging_cols,
-            title="Collector-wise Aging (In Scope Only)",
-            barmode="stack"
-        )
-        st.plotly_chart(fig_collector, use_container_width=True)
-
-        st.header("📌 Region-wise Outstanding (In Scope Only)")
-        if "REGION" in in_scope.columns:
-            region_summary = in_scope.groupby("REGION")["Outstanding"].sum().reset_index()
-            st.dataframe(region_summary)
-            fig_region = px.pie(region_summary, names="REGION", values="Outstanding", title="Region-wise Outstanding")
-            st.plotly_chart(fig_region, use_container_width=True)
-
-        st.header("📌 90+ Day Credit vs Debit (In Scope Only)")
-        in_scope["Overdue_90+"] = in_scope["Q. 181-360 day"] + in_scope["R. 360+ day"]
-        credit_debit = in_scope.groupby("CR/DB")["Overdue_90+"].sum().reset_index()
-        st.dataframe(credit_debit)
-        fig_cd = px.bar(credit_debit, x="CR/DB", y="Overdue_90+", title="Credit/Debit Overdue >90 Days")
-        st.plotly_chart(fig_cd, use_container_width=True)
-
-        st.header("📌 For Reporting View (In Scope Only)")
-        if "For Reporting" in in_scope.columns:
-            reporting_summary = in_scope.groupby("For Reporting")["Outstanding"].sum().reset_index()
-            st.dataframe(reporting_summary)
-            fig_reporting = px.pie(reporting_summary, names="For Reporting", values="Outstanding", title="For Reporting Distribution")
-            st.plotly_chart(fig_reporting, use_container_width=True)
-
+        # Read the uploaded Excel file
+        return pd.read_excel(uploaded_file, sheet_name="Pivot")
     except Exception as e:
-        st.error(f"❌ Error processing file: {e}")
+        st.error(f"Error reading the file: {e}")
+        return None
+
+# Main Streamlit App
+st.title("AR Collection Dashboard")
+
+# File uploader
+uploaded_file = st.file_uploader("Upload your Excel file (pivot_data.xlsx)", type=["xlsx"])
+
+if uploaded_file is not None:
+    # Load data from the uploaded file
+    data = load_data(uploaded_file)
+    if data is not None:
+        # Overview Section
+        st.header("Overview")
+        total_count = data['Total Count'].sum()
+        total_outstanding = data['Total Outstanding'].sum()
+        total_overdue_90 = data['Overdue > 90 Days'].sum()
+
+        st.metric("Total Count (In Scope)", total_count)
+        st.metric("Total Outstanding (In Scope)", f"${total_outstanding:,.2f}")
+        st.metric("Total Overdue > 90 Days", f"${total_overdue_90:,.2f}")
+
+        # Region-Wise Pie Chart
+        st.header("Outstanding Region-Wise")
+        region_fig = px.pie(data, names='Region', values='Outstanding Amount', title='Outstanding by Region')
+        st.plotly_chart(region_fig)
+
+        # Aging Buckets Breakdown
+        st.header("Aging Buckets Breakdown")
+        aging_fig = px.bar(data, x='Bucket', y='Amount', color='Bucket', title='Aging Buckets Breakdown')
+        st.plotly_chart(aging_fig)
+
+        # User-defined comparison
+        st.header("Data Comparison")
+        compare_options = st.multiselect("Select categories or regions to compare", data['Region'].unique())
+        if compare_options:
+            filtered_data = data[data['Region'].isin(compare_options)]
+            compare_fig = px.bar(filtered_data, x='Region', y='Outstanding Amount', color='Region', title='Comparison of Selected Regions')
+            st.plotly_chart(compare_fig)
+    else:
+        st.warning("Unable to process the uploaded file. Please check its content and format.")
 else:
-    st.info("⬆ Please upload the Master Dashboard Excel file to begin.")
+    st.info("Please upload the Excel file to generate the dashboard.")
