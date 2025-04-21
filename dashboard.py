@@ -59,10 +59,10 @@ if uploaded_file:
             st.plotly_chart(fig_region, use_container_width=True)
 
         st.header("📌 90+ Day Credit vs Debit (In Scope Only)")
-        in_scope["Overdue_90+"] = in_scope["Q. 181-360 day"] + in_scope["R. 360+ day"]
-        credit_debit = in_scope.groupby("CR/DB")["Overdue_90+"].sum().reset_index()
+        in_scope["Overdue>90+"] = in_scope["Q. 181-360 days"] + in_scope["R. 360+ days"]
+        credit_debit = in_scope.groupby("CR/DB")["Overdue>90+"].sum().reset_index()
         st.dataframe(credit_debit)
-        fig_cd = px.bar(credit_debit, x="CR/DB", y="Overdue_90+", title="Credit/Debit Overdue >90 Days")
+        fig_cd = px.bar(credit_debit, x="CR/DB", y="Overdue>90+", title="Credit/Debit Overdue >90 Days")
         st.plotly_chart(fig_cd, use_container_width=True)
 
         st.header("📌 For Reporting View (In Scope Only)")
