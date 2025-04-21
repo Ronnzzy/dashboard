@@ -11,7 +11,7 @@ if uploaded_file:
     try:
         # Read relevant sheets
         df_pivot = pd.read_excel(uploaded_file, sheet_name="Pivot")
-        df_data = pd.read_excel(uploaded_file, sheet_name="Dashboard 21 April")
+        df_data = pd.read_excel(uploaded_file, sheet_name="dashboard 21 april")
 
         st.success("✅ File Uploaded Successfully!")
 
