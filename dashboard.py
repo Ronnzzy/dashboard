@@ -21,7 +21,7 @@ if uploaded_file:
         df_data["Scope Status"] = df_data["Scope Status"].str.strip()
 
         # Convert aging columns to numeric (handle blanks)
-        aging_cols = ["M. 31-60", "N. 61-90", "O. 91-180", "P. 181-360", "Q. 360+ day", "R. Overdue > 90 days"]
+        aging_cols = ["M. 31-60.", "N. 61-90.", "O. 91-180", "P. 181-360", "Q. 360+ day", "R. Overdue > 90 days"]
         for col in aging_cols:
             df_data[col] = pd.to_numeric(df_data[col], errors='coerce').fillna(0)
 
